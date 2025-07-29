@@ -638,6 +638,35 @@ static void J_type_preparation(rv32_core_td *rv32_core, int32_t *next_subcode)
   *next_subcode = -1;
 }
 
+static void instr_ECALL(rv32_core_td *rv32_core) {
+    // Obtener el valor de a7 (que normalmente indica el tipo de llamada al sistema)
+    uint32_t syscall_num = rv32_core->x[17]; // a7 es el registro 17
+    
+
+    switch(syscall_num){
+      case 44:
+         {
+                char c = (char)(rv32_core->x[10] & 0xFF);
+                // Debug: muestra el valor ASCII que se está imprimiendo
+                // printf("[DEBUG] Printing char: %d '%c'\n", c, c >= 32 ? c : '.');
+                putchar(c);
+                fflush(stdout); // Asegura la salida inmediata
+          }
+      break;
+    }
+   /* printf("Registers:\n");
+    printf("syscall: %d \n", syscall_num);
+    printf("a0: 0x%08x (%d)\n", rv32_core->x[10], rv32_core->x[10]);
+    printf("a1: 0x%08x (%d)\n", rv32_core->x[11], rv32_core->x[11]);
+    printf("a2: 0x%08x (%d)\n", rv32_core->x[12], rv32_core->x[12]);
+    printf("a3: 0x%08x (%d)\n", rv32_core->x[13], rv32_core->x[13]);*/
+ 
+    // Avanzar el PC normalmente (ECALL no es una instrucción de salto)
+    // Esto ya se hace automáticamente en rv32_core_fetch()
+}
+
+
+
 static instruction_hook_td JALR_func3_subcode_list[] = {
   { FUNC3_INSTR_JALR, NULL, instr_JALR, NULL}
 };
@@ -716,7 +745,11 @@ static instruction_hook_td RV32I_opcode_list[] = {
   { INSTR_ADDI_SLTI_SLTIU_XORI_ORI_ANDI_SLLI_SRLI_SRAI, I_type_preparation, NULL, &ADDI_SLTI_SLTIU_XORI_ORI_ANDI_SLLI_SRLI_SRAI_func3_subcode_list_desc},
   { INSTR_ADD_SUB_SLL_SLT_SLTU_XOR_SRL_SRA_OR_AND, R_type_preparation_func3, NULL, &ADD_SUB_SLL_SLT_SLTU_XOR_SRL_SRA_OR_AND_func3_subcode_list_desc},
   { INSTR_FENCE_FENCE_I, NULL, NULL, NULL}, /* Not implemented */
-  { INSTR_ECALL_EBREAK_CSRRW_CSRRS_CSRRC_CSRRWI_CSRRSI_CSRRCI, NULL, NULL, NULL}, /* Not implemented */
+  //{ INSTR_ECALL_EBREAK_CSRRW_CSRRS_CSRRC_CSRRWI_CSRRSI_CSRRCI, NULL, NULL, NULL}, /* Not implemented */
+  { INSTR_ECALL_EBREAK_CSRRW_CSRRS_CSRRC_CSRRWI_CSRRSI_CSRRCI, 
+      I_type_preparation,  // Usamos I-type aunque ECALL no tiene operandos
+      instr_ECALL,         // Nuestra función de ejecución
+      NULL },
 };
 INIT_INSTRUCTION_LIST_DESC(RV32I_opcode_list);
 
@@ -842,6 +875,9 @@ typedef struct rv32_soc_struct
 } rv32_soc_td;
 
 
+
+ 
+
 uint32_t rv32_soc_read_mem(rv32_soc_td *rv32_soc, uint32_t address) {
     // Verifica si la dirección está dentro de los límites de la RAM
     if (address >= BASE_RAM  && address < BASE_RAM + sizeof(rv32_soc->ram)) {
@@ -860,6 +896,7 @@ uint32_t rv32_soc_read_mem(rv32_soc_td *rv32_soc, uint32_t address) {
 }
  
 
+ 
 
 void rv32_soc_write_mem(rv32_soc_td *rv32_soc, uint32_t address, uint32_t value, uint8_t width) {
     // Manejo especial para UART
@@ -875,10 +912,27 @@ void rv32_soc_write_mem(rv32_soc_td *rv32_soc, uint32_t address, uint32_t value,
     }
 
     // Convertir a dirección relativa en el array de RAM (asumiendo que es uint32_t)
-    uint32_t* mem = (uint32_t*)rv32_soc->ram;
-    uint32_t word_address = (address - BASE_RAM) / 4;
-    
+    //uint32_t* mem = (uint32_t*)rv32_soc->ram;
+    //uint32_t word_address = (address - BASE_RAM) / 4;
+    uint32_t offset = address - BASE_RAM;
+
     switch (width) {
+        case 4:
+            rv32_soc->ram[offset+3] = (value >> 24) & 0xFF;
+            rv32_soc->ram[offset+2] = (value >> 16) & 0xFF;
+            rv32_soc->ram[offset+1] = (value >> 8) & 0xFF;
+            rv32_soc->ram[offset]   = value & 0xFF;
+            break;
+            
+        case 2:
+            rv32_soc->ram[offset+1] = (value >> 8) & 0xFF;
+            rv32_soc->ram[offset]   = value & 0xFF;
+            break;
+            
+        case 1:
+            rv32_soc->ram[offset] = value & 0xFF;
+            break;
+     /*switch (width) {
         case 4:  // Store Word (32 bits)
             if (address & 3) {
                 printf("Error: Dirección no alineada 0x%08x para escritura de 32 bits\n", address);
@@ -916,8 +970,7 @@ void rv32_soc_write_mem(rv32_soc_td *rv32_soc, uint32_t address, uint32_t value,
                     mem[word_address] = (mem[word_address] & 0x00FFFFFF) | (value << 24);
                     break;
             }
-            break;
-            
+            break;*/
         default:
             printf("Error: Ancho de escritura no soportado: %d\n", width);
             break;
@@ -1045,10 +1098,10 @@ void rv32_soc_init(rv32_soc_td *rv32_soc, char *rom_file_name)
   {
     printf("%08x\n", rv32_soc->ram[i]);
   }*/
-  for (int i = 0; i < rv32_soc->size; i+=4)
+  /*for (int i = 0; i < rv32_soc->size; i+=4)
   {
     printf("%08x\n", rv32_soc_read_mem(rv32_soc,i+BASE_RAM));
-  }
+  }*/
   fclose(file);
 
   printf("RV32 SOC initialized!\n");

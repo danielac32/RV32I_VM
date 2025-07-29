@@ -1,4 +1,5 @@
 .section .text
+.option arch, +zicsr
 .global _start
 .type   _start, @function
 _start:
@@ -37,18 +38,16 @@ addi x29, zero, 0
 addi x30, zero, 0
 addi x31, zero, 0
 
-
  
+ 
+ la      a0, _sbss
+  la      a2, _ebss
+  sub     a2, a2, a0
+  li      a1, 0
+ call    memset
 
-# zero-init bss section
-la a0, _sbss
-la a1, _ebss
-bge a0, a1, end_init_bss
-loop_init_bss:
-sw zero, 0(a0)
-addi a0, a0, 4
-blt a0, a1, loop_init_bss
-end_init_bss:
+
+
 
 # call main
 call main
@@ -63,5 +62,21 @@ j loop
  
 _sp_base:
     .align 4
-    .space  1024,0
+    .space  2048,0
 _sp_top:
+
+
+
+.section .text
+
+.global __syscall
+
+__syscall:
+    mv a7,a0
+    mv a0,a1
+    mv a1,a2
+    mv a2,a3
+    mv a3,a4
+    mv a4,a5
+    ecall
+    ret
